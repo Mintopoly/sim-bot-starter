@@ -1,4 +1,4 @@
-"""Children of Titan — Sim API Python client and reference bots.
+"""Children of Titan - Sim API Python client and reference bots.
 
 Build a bot that competes on a real multiplayer leaderboard.
 

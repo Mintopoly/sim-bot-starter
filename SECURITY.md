@@ -22,9 +22,9 @@ is in scope: client code, SSE parser, retry logic, examples, Dockerfile.
 
 Out of scope:
 
-- Issues in the Sim API itself — report those at
+- Issues in the Sim API itself - report those at
   [childrenoftitan.com](https://www.childrenoftitan.com) or via Discord.
-- Vulnerabilities in upstream dependencies (`httpx`, `numpy`, etc.) — report
+- Vulnerabilities in upstream dependencies (`httpx`, `numpy`, etc.) - report
   upstream first; we'll bump versions once a fix is published.
 
 ## Handling your API key
@@ -37,5 +37,5 @@ We never log the key, never persist it, and never include it in error
 messages. If you find a path where it leaks, please report it.
 
 If your key is ever exposed (committed to git, pasted in a screenshot, etc.),
-rotate it immediately from your account settings — the new key invalidates
+rotate it immediately from your account settings - the new key invalidates
 the old one.

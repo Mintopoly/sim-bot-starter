@@ -41,7 +41,7 @@ def with_rate_limit_retry(
 
     The first wait honors the server's Retry-After header. Subsequent waits use
     exponential backoff with jitter, capped at max_backoff. Returns the final
-    response (which may still be a 429 if all retries are exhausted — caller
+    response (which may still be a 429 if all retries are exhausted - caller
     decides whether to raise).
     """
     response: httpx.Response | None = None

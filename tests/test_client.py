@@ -414,3 +414,22 @@ def test_complete_fork_targets_a_tournament(client: Client, base_url: str) -> No
     )
     assert client.complete_fork(path="PRODUCTION", tournament_id="rnd_abc")["success"] is True
     assert route.call_count == 2
+
+
+@respx.mock
+def test_my_companion_returns_the_players_companion(client: Client, base_url: str) -> None:
+    """The AI Companion's rules are readable with the same API key, so a bot can
+    run exactly the rules a player already set up in the browser."""
+    companion = {"tokenId": 7, "name": "Kernel", "rules": [], "locked": None}
+    respx.get(f"{base_url}/api/sim/companions").mock(
+        return_value=Response(200, json={"items": [], "myCompanion": companion})
+    )
+    assert client.my_companion() == companion
+
+
+@respx.mock
+def test_my_companion_is_none_without_one(client: Client, base_url: str) -> None:
+    respx.get(f"{base_url}/api/sim/companions").mock(
+        return_value=Response(200, json={"items": [], "myCompanion": None})
+    )
+    assert client.my_companion() is None

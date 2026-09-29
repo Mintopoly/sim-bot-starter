@@ -35,7 +35,7 @@ venv/
 env/
 ENV/
 
-# ─── Local config / secrets — never commit ───────────────────────────────
+# ─── Local config / secrets - never commit ───────────────────────────────
 .env
 .env.*
 !.env.example

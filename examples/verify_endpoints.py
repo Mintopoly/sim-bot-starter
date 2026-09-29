@@ -1,26 +1,26 @@
-"""Endpoint coverage verifier — exercises every Sim API endpoint once and
+"""Endpoint coverage verifier - exercises every Sim API endpoint once and
 prints a pass / skip / fail matrix.
 
 Use this as a smoke test after deploying schema or route changes, or to
 prove to yourself the kit covers the full API.
 
 What it does:
-  Reads               — calls every GET endpoint, prints a one-line summary.
+  Reads               - calls every GET endpoint, prints a one-line summary.
   Small real writes:    purchase, stake, unstake, contribute and the autostake
                         toggle, each with a tiny fraction of the bot's cash.
                         They are not undone afterwards, and the stake starts a
                         staking lockout, so run this on an account you can
                         spare for a test.
-  Conditional actions — only fires if state allows (unlock when affordable,
+  Conditional actions - only fires if state allows (unlock when affordable,
                         unstake when stakedValue>0, dismiss when short
                         circuit pending, fork only inspected, never
                         committed to avoid resetting your investments).
-  Skipped on purpose  — fork commit, use_power (needs tickets), buy_keys
+  Skipped on purpose  - fork commit, use_power (needs tickets), buy_keys
                         (real Gems). Reported as ⊘ with a reason.
 
 Exit code 0 if every endpoint is reachable; non-zero if any unexpected
 failure occurred. Sensible 400s ("insufficient cash", "no short circuit
-pending") count as a pass — they prove the route is wired and validating.
+pending") count as a pass - they prove the route is wired and validating.
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ def run() -> int:
         try:
             state = c.perception()
             if not state.active or state.player is None or state.round is None:
-                print(f"  {RED}No active round — most action tests will skip.{RESET}")
+                print(f"  {RED}No active round: most action tests will skip.{RESET}")
                 return 1
             ok(
                 "GET /api/sim/perception",
@@ -93,7 +93,7 @@ def run() -> int:
 
         try:
             full = c.full_state()
-            ok("GET /api/sim", f"keys={sorted(full.keys())[:5]}…")
+            ok("GET /api/sim", f"keys={sorted(full.keys())[:5]}...")
         except APIError as e:
             fail("GET /api/sim", str(e))
 
@@ -125,7 +125,7 @@ def run() -> int:
         # ---------- SAFE ACTIONS ----------
         section("Safe actions (POST)")
 
-        # purchase(buy) — cheapest unlocked + affordable investment, qty=1
+        # purchase(buy) - cheapest unlocked + affordable investment, qty=1
         affordable = [i for i in state.investments if i.unlocked and i.can_afford]
         if affordable:
             cheapest = min(affordable, key=lambda i: i.next_cost)
@@ -140,7 +140,7 @@ def run() -> int:
         else:
             skip("POST /api/sim/purchase action=buy", "no affordable+unlocked investment")
 
-        # purchase(unlock) — first locked investment we can afford to unlock
+        # purchase(unlock) - first locked investment we can afford to unlock
         unlockable = [i for i in state.investments if not i.unlocked and i.can_afford_unlock]
         if unlockable:
             target = unlockable[0]
@@ -160,7 +160,7 @@ def run() -> int:
         if state.player is None:
             return 1
 
-        # stake — tiny fraction of cash
+        # stake - tiny fraction of cash
         if state.staking and state.staking.can_stake and state.player.cash > 1e-6:
             stake_amount = state.player.cash * 0.05
             try:
@@ -177,7 +177,7 @@ def run() -> int:
                 f"cash={state.player.cash:.6g}",
             )
 
-        # unstake — small fraction of staked balance (refresh first to see new staked)
+        # unstake - small fraction of staked balance (refresh first to see new staked)
         state = c.perception()
         if state.player is None:
             return 1
@@ -197,7 +197,7 @@ def run() -> int:
                 f"staked={state.player.staked_value:.6g}",
             )
 
-        # contribute — 1% of current cash, must be > 0
+        # contribute - 1% of current cash, must be > 0
         state = c.perception()
         if state.player is None:
             return 1
@@ -216,7 +216,7 @@ def run() -> int:
                 f"nothing to contribute, bot has cash={state.player.cash:.6g}",
             )
 
-        # set_autostake — toggle, then toggle back
+        # set_autostake - toggle, then toggle back
         try:
             c.set_autostake(True)
             c.set_autostake(False)
@@ -229,7 +229,7 @@ def run() -> int:
         # ---------- CONDITIONAL ACTIONS ----------
         section("Conditional actions (POST)")
 
-        # fork — only inspect; commit would reset all investments. We hit the
+        # fork - only inspect; commit would reset all investments. We hit the
         # endpoint with no body, which returns the required-selection prompt
         # without committing the fork. That proves wire-up.
         try:
@@ -243,7 +243,7 @@ def run() -> int:
         except APIError as e:
             fail("POST /api/sim/fork (inspect)", str(e))
 
-        # dismiss — only meaningful when short_circuit pending; otherwise the
+        # dismiss - only meaningful when short_circuit pending; otherwise the
         # server likely returns 400/200 with no-op. Either is fine for proving
         # the route exists.
         try:
@@ -254,7 +254,7 @@ def run() -> int:
         except APIError as e:
             fail("POST /api/sim/dismiss", str(e))
 
-        # use_power — only fire if we have tickets AND a power that doesn't
+        # use_power - only fire if we have tickets AND a power that doesn't
         # require a target (immunity is the cleanest self-cast).
         state = c.perception()
         if state.player is None:
@@ -286,7 +286,7 @@ def run() -> int:
                 reason.append("already immune")
             skip("POST /api/sim/power IMMUNITY", "; ".join(reason) or "preconditions not met")
 
-        # buy_keys — requires Gems and costs real economy units. Skipped by
+        # buy_keys - requires Gems and costs real economy units. Skipped by
         # design; only verify the read endpoint above proves it's reachable.
         skip("POST /api/sim/buy-keys", "intentionally skipped (spends Gems)")
 
@@ -301,7 +301,7 @@ def run() -> int:
                 else:
                     ok("GET /api/sim/stream (SSE)", f"first event type={first.type}")
         except SubscriptionRequiredError as e:
-            fail("GET /api/sim/stream (SSE)", f"403 — bot account missing API subscription? ({e})")
+            fail("GET /api/sim/stream (SSE)", f"403: bot account missing API subscription? ({e})")
         except APIError as e:
             fail("GET /api/sim/stream (SSE)", str(e))
 

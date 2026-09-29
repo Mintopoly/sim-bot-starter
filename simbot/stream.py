@@ -1,7 +1,7 @@
 """Lightweight Server-Sent Events (SSE) parser for the Sim event stream.
 
 The Sim stream emits one JSON-encoded message per `data:` frame. This parser
-yields `SimEvent` objects from a streaming iterator of bytes — no extra deps.
+yields `SimEvent` objects from a streaming iterator of bytes - no extra deps.
 
 The SSE spec is more general than this parser handles; for the Sim's specific
 shape (`data: {...}\n\n` per event) it's enough. If you need full SSE support,

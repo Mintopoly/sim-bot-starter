@@ -38,11 +38,11 @@ class APIError(SimBotError):
 
 
 class AuthError(APIError):
-    """401 — missing, invalid, or expired API key."""
+    """401 - missing, invalid, or expired API key."""
 
 
 class SubscriptionRequiredError(APIError):
-    """403 — endpoint requires an active API subscription.
+    """403 - endpoint requires an active API subscription.
 
     `/api/sim/perception` and `/api/sim/stream` are subscription-only. Session-
     cookie auth (browser play) cannot reach them.
@@ -50,7 +50,7 @@ class SubscriptionRequiredError(APIError):
 
 
 class BadRequestError(APIError):
-    """400 — invalid input or game-rule violation (e.g. insufficient cash)."""
+    """400 - invalid input or game-rule violation (e.g. insufficient cash)."""
 
 
 class NoActiveRoundError(BadRequestError):
@@ -61,7 +61,7 @@ class NoActiveRoundError(BadRequestError):
 
 
 class RateLimitError(APIError):
-    """429 — too many requests. The client retries automatically with backoff.
+    """429 - too many requests. The client retries automatically with backoff.
 
     If you see this from user code, it means automatic retries were exhausted
     or you disabled them. Check `retry_after_seconds` and back off.

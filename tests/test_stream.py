@@ -29,7 +29,7 @@ def test_parses_multiple_events_in_one_chunk() -> None:
 
 def test_parses_event_split_across_chunks() -> None:
     full = b'data: {"type":"event:start","event":{"id":"e1"}}\n\n'
-    # Split into 1-byte chunks — buffer must reassemble
+    # Split into 1-byte chunks - buffer must reassemble
     chunks = [bytes([b]) for b in full]
     events = list(parse_sse_lines(iter(chunks)))
     assert len(events) == 1

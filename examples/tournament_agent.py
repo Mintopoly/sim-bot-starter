@@ -1,15 +1,15 @@
 """Tournament-mode reference agent.
 
-Demonstrates the tournament surface — same client, every call takes a
+Demonstrates the tournament surface - same client, every call takes a
 `tournament_id` to target a specific tournament round instead of the OPEN
 sim.
 
-Strategy (intentionally simple — like greedy_agent.py but tournament-scoped):
+Strategy (intentionally simple - like greedy_agent.py but tournament-scoped):
   * On startup: list active tournaments, pick the first BOT_ONLY tournament
     we're eligible for, register, then enter the tick loop.
   * Each tick: best earnings/cost ratio investment, stake spare cash,
-    fork at 5% projected bonus, contribute 1% of net worth per minute.
-  * Honors the round's feature flags — if disableFork is set, skip forking;
+    fork at 5% projected bonus, contribute 1% of cash per minute.
+  * Honors the round's feature flags - if disableFork is set, skip forking;
     if disableDarkWeb is set, skip immunity.
 
 Roughly tracks the greedy_agent's behaviour, scoped to one tournament.
@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from simbot import (
     Client,
     DarkWebPower,
+    Investment,
     NoActiveRoundError,
     Path,
     PerceptionState,
@@ -68,7 +69,7 @@ def select_tournament(client: Client) -> str | None:
             if t.get("entryMode") not in ("BOT_ONLY", "MIXED"):
                 continue
             if t.get("visibility") not in ("PUBLIC", None):
-                # Skip UNLISTED/PRIVATE — would need an invite_code
+                # Skip UNLISTED/PRIVATE - would need an invite_code
                 continue
             log.info(
                 "Selecting tournament %s (round %s, entryMode=%s, status=%s)",
@@ -98,7 +99,7 @@ def ensure_registered(client: Client, tournament_id: str) -> None:
         raise
 
 
-def best_investment(state: PerceptionState, max_spend: float) -> int | None:
+def best_investment(state: PerceptionState, max_spend: float) -> Investment | None:
     """Pick the best earnings-per-cost investment costing at most `max_spend`."""
     candidates = [
         i
@@ -110,20 +111,27 @@ def best_investment(state: PerceptionState, max_spend: float) -> int | None:
     ]
     if not candidates:
         return None
-    best = max(candidates, key=lambda i: (i.earnings_per_unit or 0) / i.next_cost)
-    return best.id
+    return max(candidates, key=lambda i: (i.earnings_per_unit or 0) / i.next_cost)
 
 
-def maybe_buy(client: Client, state: PerceptionState, tournament_id: str) -> None:
+def maybe_buy(client: Client, state: PerceptionState, tournament_id: str) -> bool:
+    """Buy as many units of the best investment as fit into ONE purchase.
+    Returns True if cash was spent."""
     if not state.player or state.player.is_blacked_out:
-        return
-    inv_id = best_investment(state, state.player.cash * (1 - CASH_BUFFER_FRACTION))
-    if inv_id is None:
-        return
+        return False
+    budget = state.player.cash * (1 - CASH_BUFFER_FRACTION)
+    target = best_investment(state, budget)
+    if target is None:
+        return False
+    units = target.units_affordable(budget)
+    if units == 0:
+        return False
     try:
-        client.purchase(investment_id=inv_id, quantity=1, tournament_id=tournament_id)
+        client.purchase(investment_id=target.id, quantity=units, tournament_id=tournament_id)
+        return True
     except SimBotError as e:
         log.warning("purchase failed: %s", e)
+        return False
 
 
 def maybe_stake(client: Client, state: PerceptionState, tournament_id: str) -> None:
@@ -143,22 +151,25 @@ def maybe_fork(
     state: PerceptionState,
     tournament_id: str,
     round_disable_fork: bool,
-) -> None:
+) -> bool:
+    """Fork when the projected bonus is worth it. Returns True if it forked."""
     if round_disable_fork:
-        return
+        return False
     if not state.fork or not state.fork.can_fork:
-        return
+        return False
     if state.fork.projected_bonus_percent < FORK_THRESHOLD_PERCENT:
-        return
+        return False
     try:
         # One call does the whole fork: it fetches the draft, takes the first
         # bonus and sends the path again with it. The first fork needs that:
         # a request with only the path does not store it, and an earlier
         # version of this agent sent the path alone and asked for the draft
         # every tick, for ever. Pass `choose=` to pick a bonus by your own rule.
-        client.complete_fork(path=DEFAULT_FORK_PATH, tournament_id=tournament_id)
+        result = client.complete_fork(path=DEFAULT_FORK_PATH, tournament_id=tournament_id)
+        return bool(result.get("success"))
     except SimBotError as e:
         log.warning("fork failed: %s", e)
+        return False
 
 
 def maybe_immunity(
@@ -190,7 +201,7 @@ def maybe_contribute(
         return
     if not state.player:
         return
-    amount = state.player.net_worth * CONTRIB_FRACTION
+    amount = state.player.cash * CONTRIB_FRACTION
     if amount <= 0 or amount > state.player.cash:
         return
     try:
@@ -200,12 +211,31 @@ def maybe_contribute(
         log.warning("contribute failed: %s", e)
 
 
+def fmt_money(v: float) -> str:
+    """Format money so both micro-balances (early round) and mega-balances
+    (late round) stay legible: 1.23K, 4.56M, 0.000137, 3.20e-07. Rounding to
+    whole units printed 'cash=$0' for a bot holding 0.0000031, which reads as
+    a broken bot."""
+    a = abs(v)
+    if a >= 1e9:
+        return f"{v / 1e9:.2f}B"
+    if a >= 1e6:
+        return f"{v / 1e6:.2f}M"
+    if a >= 1e3:
+        return f"{v / 1e3:.2f}K"
+    if a >= 1:
+        return f"{v:.2f}"
+    if a >= 1e-4:
+        return f"{v:.6f}"
+    return f"{v:.2e}"
+
+
 def run(client: Client, tournament_id: str) -> None:
     agent_state = State()
 
     # Read the round's feature flags once at start. The flags don't change
     # mid-round so caching is safe; if you want defense-in-depth, re-read
-    # each tick (cheap — same /perception call).
+    # each tick (cheap - same /perception call).
     initial_state = client.tournament_state(tournament_id)
     round_meta = initial_state.get("round", {}) if isinstance(initial_state, dict) else {}
     disable_fork = bool(round_meta.get("disableFork"))
@@ -222,37 +252,42 @@ def run(client: Client, tournament_id: str) -> None:
         try:
             state = client.perception(tournament_id=tournament_id)
             if not state.active:
-                log.info("Round inactive — sleeping %ds", NO_ROUND_SLEEP)
+                log.info("Round inactive, sleeping %ds", NO_ROUND_SLEEP)
                 time.sleep(NO_ROUND_SLEEP)
                 continue
             if not state.player:
-                log.info("No player state yet — sleeping a tick")
+                log.info("No player state yet, sleeping a tick")
                 time.sleep(TICK_SECONDS)
                 continue
 
             log.info(
-                "Block %s/%s | cash=%.2f networth=%.2f rank=%s/%s tickets=%s",
+                "Block %s/%s | cash=%s networth=%s rank=%s/%s tickets=%s",
                 state.round.current_block if state.round else "?",
                 state.round.total_blocks if state.round else "?",
-                state.player.cash,
-                state.player.net_worth,
+                fmt_money(state.player.cash),
+                fmt_money(state.player.net_worth),
                 state.player.rank,
                 state.player.total_players,
                 state.player.tickets,
             )
 
             maybe_immunity(client, state, tournament_id, disable_dark_web)
-            maybe_fork(client, state, tournament_id, disable_fork)
-            maybe_buy(client, state, tournament_id)
+            # Forking and buying both change cash, so re-read the state before
+            # the next step spends from it. Staking 90% of the cash read BEFORE
+            # a purchase asked the server for money that was already gone.
+            if maybe_fork(client, state, tournament_id, disable_fork):
+                state = client.perception(tournament_id=tournament_id)
+            if maybe_buy(client, state, tournament_id):
+                state = client.perception(tournament_id=tournament_id)
             maybe_stake(client, state, tournament_id)
             maybe_contribute(client, state, tournament_id, agent_state)
         except NoActiveRoundError:
-            log.info("Tournament not active — sleeping %ds", NO_ROUND_SLEEP)
+            log.info("Tournament not active, sleeping %ds", NO_ROUND_SLEEP)
             time.sleep(NO_ROUND_SLEEP)
             continue
         except RateLimitError as e:
             wait = e.retry_after_seconds or 30
-            log.warning("Rate limited — backing off %.1fs", wait)
+            log.warning("Rate limited, backing off %.1fs", wait)
             time.sleep(wait)
             continue
         except SimBotError as e:

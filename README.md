@@ -1,6 +1,6 @@
-# Children of Titan — Sim Bot Starter Kit
+# Children of Titan - Sim Bot Starter Kit
 
-Build a bot that plays [The Sim](https://www.childrenoftitan.com/sim) — a multiplayer block-based idle economy game where humans and bots compete on the same leaderboard.
+Build a bot that plays [The Sim](https://www.childrenoftitan.com/sim) - a multiplayer block-based idle economy game where humans and bots compete on the same leaderboard.
 
 ```python
 from simbot import Client
@@ -64,7 +64,7 @@ docker run -e SIM_API_KEY="sim_..." simbot python examples/greedy_agent.py
 
 1. Sign up at [childrenoftitan.com](https://www.childrenoftitan.com/register)
 2. Go to the Sim subscription page and pay $12.99/mo via Stripe
-3. Copy the API key (shown once — store it, you can regenerate but the old one stops working)
+3. Copy the API key (shown once - store it, you can regenerate but the old one stops working)
 4. Set the `SIM_API_KEY` environment variable
 
 Full API docs: [childrenoftitan.com/sim/docs](https://www.childrenoftitan.com/sim/docs)
@@ -75,12 +75,13 @@ Full API docs: [childrenoftitan.com/sim/docs](https://www.childrenoftitan.com/si
 
 | File | What it does |
 | ---- | ------------ |
-| [`examples/random_agent.py`](examples/random_agent.py) | Random valid action each tick — sanity check, not competitive. |
+| [`examples/random_agent.py`](examples/random_agent.py) | Random valid action each tick - sanity check, not competitive. |
 | [`examples/greedy_agent.py`](examples/greedy_agent.py) | Best earnings/cost ratio + stake + fork at 5%. Never unlocks a new tier; a simple starting point. |
 | [`examples/tier_climber.py`](examples/tier_climber.py) | Saves toward higher-tier unlocks, no forking. Demonstrates the unlock→buy→stake loop in isolation. |
 | [`examples/q_learning_agent.py`](examples/q_learning_agent.py) | Tabular Q-learning reference. Illustrative, not competitive. |
 | [`examples/tournament_agent.py`](examples/tournament_agent.py) | Finds an open bot tournament, registers and plays it with the greedy strategy. |
-| [`examples/verify_endpoints.py`](examples/verify_endpoints.py) | End-to-end smoke test — exercises every endpoint and prints a pass/skip/fail matrix. |
+| [`examples/rules_agent.py`](examples/rules_agent.py) | Runs your AI Companion's rules (or a JSON file of them) every block instead of every five minutes. |
+| [`examples/verify_endpoints.py`](examples/verify_endpoints.py) | End-to-end smoke test - exercises every endpoint and prints a pass/skip/fail matrix. |
 | [`examples/stream_smoke.py`](examples/stream_smoke.py) | Connects to the SSE stream, prints events for ~70 s, exits. |
 
 Read each example top-to-bottom before modifying; none is longer than about 380 lines. `tests/test_examples.py` runs every one of them against an offline copy of the game, so a change that stops a bot from trading fails the test suite. See [`examples/README.md`](examples/README.md) for the longer walk-through.
@@ -103,13 +104,19 @@ leaderboard = client.leaderboard()    # Top 100 ranks
 profile = client.profile()            # Your sim profile
 history = client.history()            # Your past round results
 cards = client.cards()                # Your cards with active boosts
+companion = client.my_companion()     # Your AI Companion and its rules, or None
 gems = client.gems_balance()          # User-level gem balance + last 20 transactions
 keys = client.buy_keys_info()         # Key purchase options + current key/gem balance
                                       #   pass tournament_id=... for round-scoped balance
 
 # Take actions (amounts as fractions: the economy starts in millionths)
-me = client.perception().player                           # Your cash and stake right now
 client.purchase(investment_id=0, quantity=5)              # Buy 5 of investment 0
+now = client.perception()                                 # Fresh state before you spend
+me, rig = now.player, now.investments[0]                  # Your cash and stake, investment 0
+n = rig.units_affordable(me.cash * 0.9)                   # How many fit into ONE purchase (0 = none)
+if n:
+    cost = rig.cost_of(n)                                 # What that purchase will cost
+    client.purchase(investment_id=0, quantity=n)          # ...priced along the curve, like the server
 client.purchase(investment_id=3, action="unlock")         # Unlock a tier
 client.stake(amount=me.cash * 0.5)                        # Stake half your cash
 client.unstake(amount=me.staked_value * 0.5)              # Unstake half your stake
@@ -142,6 +149,20 @@ This is not theoretical. Two of the example bots once waited for 1,000 cash befo
 
 ---
 
+## Buy many units in one request
+
+Every unit costs `coefficient` times the one before, and the server charges a multi-unit purchase exactly along that curve. So there is no need to buy one unit, re-read the state and buy again: `investment.units_affordable(budget)` says how many fit into one `purchase(quantity=...)`. It takes the same limits as the AI Companion's buy rule: `max_unit_price` (never pay more than this for a single unit), `until_owned` (stop at a target count) and `limit` (at most 100 by default). One request instead of up to a dozen per tick also keeps your bot well clear of the rate limit.
+
+---
+
+## Coming from the AI Companion
+
+The AI Companion is the in-game rule bot: "if these conditions hold, buy or unlock this", run for you about every five minutes. [`examples/rules_agent.py`](examples/rules_agent.py) runs exactly the same rules through the API, every block. By default it fetches your Companion's rules with your API key, so the rules you built in the browser work unchanged; `--rules file.json` loads rules in the same format instead (see [`examples/rules.example.json`](examples/rules.example.json)). From there it is a normal Python bot you can extend.
+
+**Do not run a bot and an enabled Companion on the same account at the same time.** Both spend the same cash, the Companion every five minutes and your bot every block, and neither knows about the other. Pause the Companion in the browser while your bot runs.
+
+---
+
 ## Which economy is this round?
 
 Every round draws one of five coefficient presets at random, and it sets all unit prices, how fast they climb and what each unit pays. The same strategy plays very differently across them, so read it before you commit:
@@ -166,14 +187,14 @@ The exact numbers are already on every `Investment` (`coefficient`, `next_cost`,
 
 ## Fork mechanics your bot needs to know
 
-Forking is the prestige system: reset your investments and staking for a permanent earnings multiplier. Each fork also lets you draft one bonus from your chosen path. There are three paths: **Production**, **Staking**, **Dark Web** — pick once on your first fork, locked for the round.
+Forking is the prestige system: reset your investments and staking for a permanent earnings multiplier. Each fork also lets you draft one bonus from your chosen path. There are three paths: **Production**, **Staking**, **Dark Web** - pick once on your first fork, locked for the round.
 
 Key rules to encode into your bot:
 
 - **Fork with `complete_fork`**. A fork takes two requests: one returns the bonus draft, the other commits your pick. On the first fork of a round the path has to go out again with the bonus, because a request with only the path returns the draft without storing it. `client.complete_fork(path=..., choose=...)` sends both correctly; `client.fork()` is the single low-level request.
 - **Cooldown**: a minimum of 1000 blocks (~4 hours at 15s/block) between consecutive forks. Read `state.fork.cooldown_blocks_remaining` (0 = forkable). `state.fork.can_fork` already accounts for cooldown, max-forks, and positive-net-worth gates.
 - **Max 7 forks per round**. With the 1000-block cooldown, a full 7-fork run takes at least ~25 hours of round time.
-- **Bonus draft is deterministic**: calling `client.fork()` without a `bonus_id` returns the full eligible bonus list for your path/fork-count (3-5 options). Re-calling returns the same set — no rerolls. Pick the bonus that fits your strategy.
+- **Bonus draft is deterministic**: calling `client.fork()` without a `bonus_id` returns the full eligible bonus list for your path/fork-count (3-5 options). Re-calling returns the same set - no rerolls. Pick the bonus that fits your strategy.
 - **Bonus IDs use SCREAMING_SNAKE_CASE** (e.g. `PROD_EARNINGS_1`, `STAKE_RATE_1`, `DARK_KEY_1`). The exact set is in the round's `client.paths()` response.
 
 ### Path bonuses (after the round-194 rebalance)
@@ -201,7 +222,7 @@ Key rules to encode into your bot:
 
 On Staking, pure stacking of `STAKE_RATE_1` caps at +25%, and the one-shot `STAKE_RATE_2` brings you to +35%.
 
-**Immunity-on-unstake**: only grants if you're not already immune. Spamming `client.unstake()` to refresh immunity won't work — the prior grant must fully expire first.
+**Immunity-on-unstake**: only grants if you're not already immune. Spamming `client.unstake()` to refresh immunity won't work - the prior grant must fully expire first.
 
 ---
 
@@ -218,7 +239,7 @@ while True:
     try:
         state = client.perception()
         if not state.active:
-            print("No active round — sleeping 5 minutes")
+            print("No active round - sleeping 5 minutes")
             time.sleep(300)
             continue
 
@@ -243,7 +264,7 @@ The included `examples/` bots follow this pattern.
 - **Fork**: extra 30 / minute cap on top
 - **Power**: extra 20 / minute cap on top
 
-The client automatically handles 429 responses with `Retry-After`. You should still avoid hammering — perception once per block (~15s) is plenty.
+The client automatically handles 429 responses with `Retry-After`. You should still avoid hammering - perception once per block (~15s) is plenty.
 
 ---
 
@@ -257,7 +278,7 @@ Want round-end logs, decision traces, and structured exports for offline trainin
 
 Quarterly bot-only tournaments with prize pools. Winning bots get cash, badges, and bragging rights. See the [public leaderboard](https://www.childrenoftitan.com/sim/explorer) for upcoming events.
 
-Top tournament bots are featured on the official Twitter and Discord — share your code, win subscribers.
+Top tournament bots are featured on the official Twitter and Discord - share your code, win subscribers.
 
 ### Bot-side API
 
@@ -271,7 +292,7 @@ with Client() as client:
     rounds = client.list_tournaments(entry_mode="BOT_ONLY")
     rnd = next(r for r in rounds if r["status"] in {"PENDING", "ACTIVE"})
 
-    # 2. Register (idempotent — safe to call on every restart)
+    # 2. Register (idempotent - safe to call on every restart)
     client.register_for_tournament(rnd["id"], bot_name="GreedyBot")
 
     # 3. Drive the round with the same calls you use for solo
@@ -282,23 +303,23 @@ with Client() as client:
     client.contribute(amount=state.player.cash * 0.01, tournament_id=rnd["id"])
 ```
 
-Reference agent: [`examples/tournament_agent.py`](./examples/tournament_agent.py) — auto-selects an eligible tournament, registers, then runs a greedy strategy scoped to that round. Honors the round's feature flags (`disableCardBoosts`, `disableFork`, `disableDarkWeb`).
+Reference agent: [`examples/tournament_agent.py`](./examples/tournament_agent.py) - auto-selects an eligible tournament, registers, then runs a greedy strategy scoped to that round. Honors the round's feature flags (`disableCardBoosts`, `disableFork`, `disableDarkWeb`).
 
 ### What's tournament-only
 
-- `client.list_tournaments(entry_mode=..., visibility=...)` — filter active and pending tournaments
-- `client.tournament_state(round_id)` — full state alias for `full_state(tournament_id=...)`
-- `client.register_for_tournament(round_id, bot_name=..., bot_author_url=..., invite_code=...)` — registration
-- `client.withdraw_from_tournament(round_id)` — withdraw + refund (PENDING rounds only)
-- `client.create_tournament(...)` — programmatic creation; supports an optional `creation_fee_gold` layer that pays winners in in-game Gold on top of gems
-- `client.purchase(..., tournament_id=...)` — same surface as solo, routes to tournament endpoints
+- `client.list_tournaments(entry_mode=..., visibility=...)` - filter active and pending tournaments
+- `client.tournament_state(round_id)` - full state alias for `full_state(tournament_id=...)`
+- `client.register_for_tournament(round_id, bot_name=..., bot_author_url=..., invite_code=...)` - registration
+- `client.withdraw_from_tournament(round_id)` - withdraw + refund (PENDING rounds only)
+- `client.create_tournament(...)` - programmatic creation; supports an optional `creation_fee_gold` layer that pays winners in in-game Gold on top of gems
+- `client.purchase(..., tournament_id=...)` - same surface as solo, routes to tournament endpoints
 
 ### Prize pools: gems + optional gold
 
 Tournament prize pools have two layers:
 
-- **Gems** — always present. Seeded by `creation_fee_gems` (creator) and grown by `entry_fee_gems` from each registrant.
-- **Gold** — optional. Seeded once at creation via `creation_fee_gold` (in-game Gold balance). No equivalent entry-fee path; the pool stays at the creator's seed.
+- **Gems** - always present. Seeded by `creation_fee_gems` (creator) and grown by `entry_fee_gems` from each registrant.
+- **Gold** - optional. Seeded once at creation via `creation_fee_gold` (in-game Gold balance). No equivalent entry-fee path; the pool stays at the creator's seed.
 
 Both layers are distributed by the same per-rank `prize_distribution_json` shape. Read the breakdown on `full_state(tournament_id=...).round`:
 
@@ -313,7 +334,7 @@ Tournament winners do **not** receive sim tickets: tickets are an OPEN-sim mecha
 
 ### What stays sim-only
 
-`profile`, `history`, `cards`, `autostake_status`, `power_info`, and the SSE `stream` are sim-only — passing `tournament_id` to them raises `ValueError`. For tournament autostake/power/card state, read it off `perception(tournament_id=...)` instead (`.player.auto_stake_enabled`, `.powers`, and the cards block in `.raw`).
+`profile`, `history`, `cards`, `autostake_status`, `power_info`, and the SSE `stream` are sim-only - passing `tournament_id` to them raises `ValueError`. For tournament autostake/power/card state, read it off `perception(tournament_id=...)` instead (`.player.auto_stake_enabled`, `.powers`, and the cards block in `.raw`).
 
 `buy_keys` and `buy_keys_info` are **dual-mode**: solo keys go to your sim key balance and stay spendable across future rounds, while tournament keys go to that round's own balance and transfer back when it is finalized. Bots can buy keys on either surface, since dark-web powers are core gameplay.
 
@@ -327,7 +348,7 @@ For `PRIVATE` tournaments you need either an explicit invite from the round's cr
 
 ## Contributing
 
-PRs welcome. The kit is intentionally minimal so anyone can read the whole thing in 30 minutes. If you build a non-trivial example bot, send a PR — we'll feature good ones in the README.
+PRs welcome. The kit is intentionally minimal so anyone can read the whole thing in 30 minutes. If you build a non-trivial example bot, send a PR - we'll feature good ones in the README.
 
 ```bash
 # Dev setup

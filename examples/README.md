@@ -1,6 +1,6 @@
 # Example Bots
 
-Seven scripts: five bots and two utilities. Read them top to bottom; none is longer than about 380 lines.
+Eight scripts: six bots and two utilities. Read them top to bottom; none is longer than about 380 lines.
 
 | File | Purpose |
 | ---- | ------- |
@@ -9,6 +9,7 @@ Seven scripts: five bots and two utilities. Read them top to bottom; none is lon
 | [`tier_climber.py`](tier_climber.py) | Bot that prioritises unlocking higher tiers, no forking. |
 | [`q_learning_agent.py`](q_learning_agent.py) | Tabular Q-learning reference. Illustrative, not competitive. |
 | [`tournament_agent.py`](tournament_agent.py) | Finds an open bot tournament, registers and plays it greedily. |
+| [`rules_agent.py`](rules_agent.py) | Runs your AI Companion's rules every block. |
 | [`verify_endpoints.py`](verify_endpoints.py) | Smoke test that exercises every endpoint once. |
 | [`stream_smoke.py`](stream_smoke.py) | Prints SSE events for ~70 seconds and exits. |
 
@@ -26,7 +27,7 @@ SIM_API_KEY=sim_... python examples/random_agent.py
 
 A single-page heuristic strategy:
 
-- Buys the affordable investment with the highest **earnings ÷ cost** ratio
+- Buys the affordable investment with the highest **earnings ÷ cost** ratio, as many units as fit in one purchase (`MAX_UNIT_PRICE` caps what it pays per unit)
 - Stakes spare cash above a buffer
 - Forks when the projected bonus exceeds 5%
 - Contributes 1% of net worth to the round goal once per minute
@@ -66,7 +67,7 @@ The Q-table is persisted to `qtable.npy` (with metadata in `qtable_meta.json`) e
 **Caveats:**
 - State buckets are deliberately coarse (~720 states). Fine-grained spaces need value approximation, not tabular Q.
 - Reward signal is net-worth delta + scaled fork-bonus delta. Tweak it.
-- Illustrative, not competitive — your job is to build a competitive bot.
+- Illustrative, not competitive - your job is to build a competitive bot.
 
 ## `tournament_agent.py`
 
@@ -74,6 +75,19 @@ The same greedy strategy, scoped to one tournament round. On start it lists the 
 
 ```bash
 SIM_API_KEY=sim_... python examples/tournament_agent.py [--round-id rnd_xyz]
+```
+
+## `rules_agent.py`
+
+Runs AI Companion rules through the API, every block instead of every five minutes. With no arguments it fetches your Companion's rules with your API key: the committed set the Companion runs this round, or your draft if nothing is committed yet, with each rule's on/off switch taken from the draft. `--rules file.json` loads rules in the same format instead ([`rules.example.json`](rules.example.json) shows every field). Without either it uses a small built-in starter set.
+
+It evaluates rules the way the Companion does: in order, disabled rules skipped, all conditions must hold, and at most one action per tick. If a rule matches but cannot act (the unlock is unaffordable, or not even one unit fits the budget or price cap), the next rule gets its turn.
+
+Pause your Companion in the browser while this runs: both spend the same cash.
+
+```bash
+SIM_API_KEY=sim_... python examples/rules_agent.py
+SIM_API_KEY=sim_... python examples/rules_agent.py --rules examples/rules.example.json
 ```
 
 ## `verify_endpoints.py`

@@ -30,5 +30,5 @@ RUN pip install --no-cache-dir --upgrade pip \
 RUN useradd -m -u 1000 simbot && chown -R simbot:simbot /app
 USER simbot
 
-# Default to greedy agent — override at runtime
+# Default to greedy agent - override at runtime
 CMD ["python", "examples/greedy_agent.py"]

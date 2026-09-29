@@ -1,4 +1,4 @@
-"""Random agent — baseline for the Sim bot starter kit.
+"""Random agent - baseline for the Sim bot starter kit.
 
 Picks a random valid action each tick. Useful as a "is anything wired up?"
 smoke test. Will NOT climb the leaderboard.
@@ -69,7 +69,7 @@ def pick_random_action(client: Client, state: PerceptionState) -> str:
         affordable = [i for i in state.investments if i.unlocked and i.can_afford]
         target = random.choice(affordable)
         client.purchase(investment_id=target.id, quantity=1)
-        return f"bought 1× {target.name} (id={target.id}) for ${fmt_money(target.next_cost)}"
+        return f"bought 1x {target.name} (id={target.id}) for ${fmt_money(target.next_cost)}"
 
     if choice == "stake":
         amount = state.player.cash * random.uniform(0.1, 0.5)
@@ -82,7 +82,7 @@ def pick_random_action(client: Client, state: PerceptionState) -> str:
         return f"unstaked ${fmt_money(amount)}"
 
     if choice == "fork":
-        # Try to fork — if path/bonus selection is needed, the API tells us
+        # Try to fork - if path/bonus selection is needed, the API tells us
         # what to pick; a real bot would respond. For randomness we just
         # log the response and carry on.
         result = client.fork()
@@ -110,7 +110,7 @@ def run() -> None:
 
                 action = pick_random_action(client, state)
                 log.info(
-                    "block %d  cash=$%s  nw=$%s  rank=%d/%d  → %s",
+                    "block %d  cash=$%s  nw=$%s  rank=%d/%d  -> %s",
                     state.round.current_block if state.round else -1,
                     fmt_money(state.player.cash),
                     fmt_money(state.player.net_worth),
@@ -130,7 +130,7 @@ def run() -> None:
                 continue
             except SimBotError as exc:
                 log.warning("API error: %s", exc)
-            except Exception as exc:  # noqa: BLE001 — bots run forever, log everything
+            except Exception as exc:  # noqa: BLE001 - bots run forever, log everything
                 log.exception("Unexpected error: %s", exc)
 
             time.sleep(TICK_SECONDS)

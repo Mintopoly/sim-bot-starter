@@ -1,4 +1,4 @@
-"""Tests for type parsing — graceful handling of missing/extra fields."""
+"""Tests for type parsing - graceful handling of missing/extra fields."""
 
 from __future__ import annotations
 
@@ -219,7 +219,7 @@ def test_perception_parses_tournament_full_state_shape() -> None:
 
 
 def test_perception_solo_shape_still_works() -> None:
-    """The compatibility shim must NOT touch solo perception responses —
+    """The compatibility shim must NOT touch solo perception responses -
     only payloads that look unmistakably tournament-shaped get rewritten."""
     solo_payload = {
         "active": True,
@@ -237,7 +237,7 @@ def test_perception_solo_shape_still_works() -> None:
     assert state.player.cash == 999.0
     assert state.player.rank == 3
     # Solo darkWeb.powers must be preserved (the tournament shim would
-    # have wiped this — make sure it doesn't trigger on solo payloads).
+    # have wiped this - make sure it doesn't trigger on solo payloads).
     assert len(state.powers) == 1
     assert state.powers[0].id == DarkWebPower.IMMUNITY
 
@@ -380,3 +380,38 @@ def test_round_economy_is_none_when_the_server_does_not_send_it() -> None:
     state = PerceptionState._from_json(_tournament_payload_with([]))
     assert state.round is not None
     assert state.round.economy is None
+
+
+def _inv(**over: object) -> Investment:
+    base = {"id": 0, "name": "Mining Rig", "owned": 5, "unlocked": True,
+            "nextCost": 1.0, "coefficient": 2.0, "canAfford": True}
+    return Investment._from_json({**base, **over})
+
+
+def test_units_affordable_walks_the_price_curve() -> None:
+    """Each unit costs `coefficient` times the one before, starting at next_cost:
+    1 + 2 + 4 = 7. One purchase of that many is what the server charges too."""
+    assert _inv().units_affordable(7.0) == 3
+    assert _inv().units_affordable(6.99) == 2
+    assert _inv().units_affordable(0.5) == 0
+
+
+def test_units_affordable_honours_a_price_cap_per_unit() -> None:
+    """The AI Companion refuses a 'buy max' rule without a cap, because the cost
+    curve is geometric and a large budget otherwise buys ever pricier units."""
+    assert _inv().units_affordable(1_000.0, max_unit_price=3.0) == 2  # 1, 2 yes; 4 no
+
+
+def test_units_affordable_stops_at_a_target_count() -> None:
+    assert _inv().units_affordable(1_000.0, until_owned=7) == 2  # owns 5, target 7
+    assert _inv().units_affordable(1_000.0, until_owned=5) == 0
+
+
+def test_units_affordable_respects_the_limit_and_locked_lines() -> None:
+    assert _inv(coefficient=1.0).units_affordable(1_000.0, limit=10) == 10
+    assert _inv(unlocked=False).units_affordable(1_000.0) == 0
+
+
+def test_cost_of_sums_the_curve() -> None:
+    assert _inv().cost_of(3) == 7.0
+    assert _inv().cost_of(0) == 0.0

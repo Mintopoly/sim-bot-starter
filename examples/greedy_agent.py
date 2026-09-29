@@ -1,4 +1,4 @@
-"""Greedy heuristic agent — a reasonable single-page Sim strategy.
+"""Greedy heuristic agent - a reasonable single-page Sim strategy.
 
 Strategy:
   * Each tick, look at every affordable+unlocked investment and buy the one
@@ -6,13 +6,13 @@ Strategy:
     It never unlocks a new tier, so it stays on the investments it starts
     with; tier_climber.py shows how to unlock.
   * Stake any cash above the cash buffer once the staking lockout clears.
-  * Fork when projected bonus exceeds 5% (or 2% past block ~80% — last-stretch
+  * Fork when projected bonus exceeds 5% (or 2% past block ~80% - last-stretch
     forks compound less, so we relax the threshold).
   * Contribute 1% of net worth to the round goal once a minute (cheap goodwill,
     plus the ticket reward for finishing rounds is meaningful long-term).
   * Defend with IMMUNITY when affordable to mitigate blackout attacks.
   * On first fork: pick PRODUCTION (most stat-boost flexibility). Bonus draft:
-    pick the first available — a smarter bot would weight by current state.
+    pick the first available - a smarter bot would weight by current state.
 
 A deliberately simple starting point that leaves plenty of room for your own
 improvements.
@@ -45,11 +45,15 @@ TICK_SECONDS = 15
 # so any fixed amount stops the bot at one end of the economy. A fixed 1,000 meant
 # it never bought its first unit and sat on its starting cash all round.
 CASH_BUFFER_FRACTION = 0.10
+# Optional ceiling on the price of any single unit (None = no ceiling). The
+# cost curve is geometric, so without one a big budget keeps buying ever
+# pricier units. It is an absolute amount, so set it for the round you play.
+MAX_UNIT_PRICE: float | None = None
 FORK_THRESHOLD_PERCENT = 5.0  # default fork trigger
 FORK_LATE_THRESHOLD_PERCENT = 2.0  # relaxed in late round
 LATE_ROUND_PROGRESS = 0.80  # ≥80% block progress is "late"
 CONTRIB_INTERVAL_SECONDS = 60.0
-CONTRIB_FRACTION = 0.01  # 1% of net worth per minute — cheap goodwill
+CONTRIB_FRACTION = 0.01  # 1% of net worth per minute - cheap goodwill
 IMMUNITY_RESERVE_FRACTION = 0.30  # don't blow >30% of keys on defense
 DEFAULT_FORK_PATH = Path.PRODUCTION
 NO_ROUND_SLEEP = 300
@@ -59,7 +63,7 @@ log = logging.getLogger("greedy_agent")
 
 @dataclass
 class State:
-    """In-process state — survives ticks, not bot restarts."""
+    """In-process state - survives ticks, not bot restarts."""
 
     last_contribution_at: float = 0.0
     forks_attempted: int = 0
@@ -146,7 +150,7 @@ def maybe_fork(client: Client, state: PerceptionState, mem: State) -> str | None
     if result.get("success"):
         mem.forks_attempted += 1
         return f"forked ({DEFAULT_FORK_PATH.value})"
-    return f"fork→ {result.get('message', 'pending')}"
+    return f"fork -> {result.get('message', 'pending')}"
 
 
 # ─── Tick ─────────────────────────────────────────────────────────────────
@@ -162,7 +166,7 @@ def tick(client: Client, mem: State) -> None:
 
     actions: list[str] = []
 
-    # 1. Defense first — being blacked out is bad
+    # 1. Defense first - being blacked out is bad
     defense = maybe_buy_immunity(client, state)
     if defense:
         actions.append(defense)
@@ -171,30 +175,25 @@ def tick(client: Client, mem: State) -> None:
     fork_action = maybe_fork(client, state, mem)
     if fork_action:
         actions.append(fork_action)
-        # After forking, refresh state — investments are reset, cash starts over
+        # After forking, refresh state - investments are reset, cash starts over
         state = client.perception()
         if not state.active or state.player is None:
             return
 
-    # 3. Buy investments greedily until we hit the cash buffer
-    bought_count = 0
-    while True:
-        target = best_affordable(state)
-        buffer = state.player.cash * CASH_BUFFER_FRACTION
-        if target is None or target.next_cost > (state.player.cash - buffer):
-            break
-        client.purchase(investment_id=target.id, quantity=1)
-        bought_count += 1
-        # We could loop client.perception() here for the latest cash, but
-        # that's expensive — assume the cost is roughly constant within a tick
-        # and break if we've made many buys.
-        state = client.perception()
-        if not state.active or state.player is None:
-            return
-        if bought_count >= 5:
-            break  # avoid burning all action rate-limit budget on one tick
-    if bought_count:
-        actions.append(f"bought {bought_count} investments")
+    # 3. Buy the best line in ONE request. units_affordable walks the price
+    #    curve the way the server charges it, so there is no need to buy a
+    #    unit, re-read state and buy again: that cost up to eleven requests
+    #    a tick for what one request does.
+    target = best_affordable(state)
+    if target is not None:
+        budget = state.player.cash * (1 - CASH_BUFFER_FRACTION)
+        units = target.units_affordable(budget, max_unit_price=MAX_UNIT_PRICE)
+        if units:
+            client.purchase(investment_id=target.id, quantity=units)
+            actions.append(f"bought {units}x {target.name}")
+            state = client.perception()  # the purchase spent cash
+            if not state.active or state.player is None:
+                return
 
     # 4. Stake any remaining cash above the buffer (if lockout clear)
     amount = state.player.cash * (1 - CASH_BUFFER_FRACTION)
@@ -202,18 +201,18 @@ def tick(client: Client, mem: State) -> None:
         client.stake(amount=amount)
         actions.append(f"staked ${amount:.6g}")
 
-    # 5. Contribute to round goal — small but adds up
+    # 5. Contribute to round goal - small but adds up
     contrib = maybe_contribute(client, state, mem)
     if contrib:
         actions.append(contrib)
 
     # 6. Log the tick
     log.info(
-        "block %d/%d  nw=$%s  cash=$%.0f  rank=%d/%d  forks=%d  → %s",
+        "block %d/%d  nw=$%s  cash=$%s  rank=%d/%d  forks=%d  -> %s",
         state.round.current_block,
         state.round.total_blocks,
-        _short(state.player.net_worth),
-        state.player.cash,
+        fmt_money(state.player.net_worth),
+        fmt_money(state.player.cash),
         state.player.rank,
         state.player.total_players,
         state.player.fork_number,
@@ -224,12 +223,23 @@ def tick(client: Client, mem: State) -> None:
 # ─── Helpers (display) ────────────────────────────────────────────────────
 
 
-def _short(value: float) -> str:
-    """Compact net-worth display: 1234567 → '1.23M'."""
-    for suffix, scale in (("Q", 1e15), ("T", 1e12), ("B", 1e9), ("M", 1e6), ("K", 1e3)):
-        if abs(value) >= scale:
-            return f"{value / scale:.2f}{suffix}"
-    return f"{value:.0f}"
+def fmt_money(v: float) -> str:
+    """Format money so both micro-balances (early round) and mega-balances
+    (late round) stay legible: 1.23K, 4.56M, 0.000137, 3.20e-07. Rounding to
+    whole units printed 'cash=$0' for a bot holding 0.0000031, which reads as
+    a broken bot."""
+    a = abs(v)
+    if a >= 1e9:
+        return f"{v / 1e9:.2f}B"
+    if a >= 1e6:
+        return f"{v / 1e6:.2f}M"
+    if a >= 1e3:
+        return f"{v / 1e3:.2f}K"
+    if a >= 1:
+        return f"{v:.2f}"
+    if a >= 1e-4:
+        return f"{v:.6f}"
+    return f"{v:.2e}"
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────

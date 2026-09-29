@@ -12,7 +12,9 @@ Nothing here reaches the network, and the key and API URL are always set explici
 from __future__ import annotations
 
 import importlib
+import logging
 import random
+import re
 import sys
 import time
 from collections.abc import Callable, Iterator
@@ -135,3 +137,94 @@ def test_verify_endpoints_passes_and_contributes(sim: FakeSim) -> None:
 def test_stream_smoke_reads_events(sim: FakeSim, capsys: pytest.CaptureFixture[str]) -> None:
     example("stream_smoke").run()
     assert "block:advance" in capsys.readouterr().out
+
+
+# ─── output a new user reads ─────────────────────────────────────────────
+
+BOTS = [
+    ("greedy_agent", "run"),
+    ("tier_climber", "run"),
+    ("random_agent", "run"),
+    ("q_learning_agent", "run"),
+    ("tournament_agent", "main"),
+    ("rules_agent", "main"),
+]
+
+
+def _run_bot_capturing(
+    name: str, entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    if name == "q_learning_agent":
+        pytest.importorskip("numpy")
+        monkeypatch.chdir(tmp_path)
+    if name in {"tournament_agent", "rules_agent"}:
+        monkeypatch.setattr(sys, "argv", [f"{name}.py"])
+    caplog.set_level(logging.INFO)
+    random.seed(3)
+    run_ticks(monkeypatch, getattr(example(name), entry), ticks=4)
+
+
+@pytest.mark.parametrize(("name", "entry"), BOTS)
+def test_bot_output_is_plain_ascii(
+    name: str, entry: str, sim: FakeSim, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A Windows console or a redirected log file is cp1252 by default: arrows,
+    multiplication signs and dashes came out as escape codes or replacement marks."""
+    _run_bot_capturing(name, entry, monkeypatch, tmp_path, caplog)
+    text = caplog.text + capsys.readouterr().out
+    assert text.isascii(), sorted({c for c in text if ord(c) > 127})
+
+
+def test_verify_endpoints_output_is_plain_ascii(
+    sim: FakeSim, capsys: pytest.CaptureFixture[str]
+) -> None:
+    example("verify_endpoints").run()
+    out = capsys.readouterr().out
+    assert out.isascii(), sorted({c for c in out if ord(c) > 127})
+
+
+@pytest.mark.parametrize(
+    ("name", "entry"), [b for b in BOTS if b[0] in {"greedy_agent", "q_learning_agent",
+                                                    "tournament_agent"}]
+)
+def test_bot_never_shows_zero_cash_while_holding_some(
+    name: str, entry: str, sim: FakeSim, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The economy starts at 0.000001: rounding to whole units printed 'cash=$0'
+    for a bot that held cash, and a new user reads that as a broken bot."""
+    _run_bot_capturing(name, entry, monkeypatch, tmp_path, caplog)
+    lines = [r.getMessage() for r in caplog.records if "cash=" in r.getMessage()]
+    assert lines, "no status line was logged"
+    for line in lines:
+        assert not re.search(r"cash=\$?0(\.0+)?(\s|$)", line), line
+
+
+@pytest.mark.parametrize(("name", "entry"), BOTS)
+def test_bot_never_acts_on_stale_cash(
+    name: str, entry: str, sim: FakeSim, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Buying spends cash, so a bot that stakes or contributes afterwards from the
+    state it read BEFORE the purchase asks for money it no longer has, and the
+    server refuses. The error is caught, so the only visible sign is that the
+    stake quietly never happens."""
+    _run_bot_capturing(name, entry, monkeypatch, tmp_path, caplog)
+    assert sim.rejected == [], f"{name} was refused: {sim.rejected}"
+
+
+@pytest.mark.parametrize("name", ["greedy_agent", "tier_climber", "tournament_agent"])
+def test_bot_buys_many_units_in_one_request(
+    name: str, sim: FakeSim, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A multi-unit purchase is priced along the curve by the server, so buying
+    one unit, re-reading state and buying again cost up to eleven requests a
+    tick for what one request does."""
+    entry = dict(BOTS)[name]
+    _run_bot_capturing(name, entry, monkeypatch, tmp_path, caplog)
+    assert sim.purchase_requests >= 1
+    assert sim.purchases > sim.purchase_requests, (sim.purchases, sim.purchase_requests)
+    assert sim.purchase_requests <= 4  # at most one purchase request per tick

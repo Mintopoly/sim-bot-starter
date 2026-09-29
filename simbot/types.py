@@ -2,7 +2,7 @@
 
 These mirror the shape returned by `/api/sim/perception` and the ancillary
 endpoints. Fields not present in a particular response default to `None` rather
-than raising — the API evolves, and a starter kit shouldn't break on a new
+than raising - the API evolves, and a starter kit shouldn't break on a new
 field appearing.
 
 Naming convention: snake_case Python fields, mapped from the camelCase JSON via
@@ -11,6 +11,7 @@ the `_from_json` classmethods.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -201,6 +202,52 @@ class Investment:
             coefficient=float(d.get("coefficient", 1.0)),
         )
 
+    def units_affordable(
+        self,
+        budget: float,
+        *,
+        max_unit_price: float | None = None,
+        limit: int = 100,
+        until_owned: int | None = None,
+    ) -> int:
+        """How many units fit into ONE purchase, walking the price curve.
+
+        Each unit costs `coefficient` times the one before, starting at
+        `next_cost` (which already includes any live event multiplier), and the
+        server charges a multi-unit purchase exactly that way. So instead of
+        buying one unit, re-reading state and buying again, a bot can send
+        `client.purchase(investment_id=..., quantity=n)` once with this `n`.
+
+        Mirrors the AI Companion's buy rule:
+            budget:          cash you are willing to spend on this purchase.
+            max_unit_price:  stop before any single unit costing more than this.
+                             The curve is geometric, so a large budget otherwise
+                             buys ever pricier units. Note it is an absolute
+                             amount; see the README on the economy's scale.
+            limit:           most units per purchase (the manual buy cap is 100).
+            until_owned:     stop once you would own this many.
+
+        Returns 0 for a locked investment or when not even one unit fits.
+        """
+        if not self.unlocked or self.next_cost <= 0:
+            return 0
+        ceiling = limit
+        if until_owned is not None:
+            ceiling = min(ceiling, until_owned - self.owned)
+        cap = math.inf if max_unit_price is None else max_unit_price
+        price, spent, units = self.next_cost, 0.0, 0
+        while units < ceiling:
+            if not math.isfinite(price) or price > cap or spent + price > budget:
+                break
+            spent += price
+            units += 1
+            price *= self.coefficient
+        return units
+
+    def cost_of(self, units: int) -> float:
+        """Total price of the next `units` units, the amount one purchase of them costs."""
+        return sum(self.next_cost * self.coefficient**k for k in range(max(0, units)))
+
 
 @dataclass(frozen=True)
 class Event:
@@ -340,7 +387,7 @@ class PerceptionState:
 
     This is the single endpoint to call every block. It rolls up round, player,
     investments, events, fork analysis, dark web, staking, and leaderboard
-    into one structured payload — replacing 5+ GETs.
+    into one structured payload - replacing 5+ GETs.
     """
 
     active: bool
@@ -384,7 +431,7 @@ class PerceptionState:
         # `events.past`, no `darkWeb`) instead of the solo perception
         # shape (`player`, `fork`, `events.recent`, `darkWeb`). Detect and
         # rewrite so the same PerceptionState dataclass works in both
-        # contexts — bots get a uniform parser as the README promises.
+        # contexts - bots get a uniform parser as the README promises.
         normalized = _normalize_tournament_perception(d) if _looks_like_tournament_shape(d) else d
 
         events = normalized.get("events") or {}

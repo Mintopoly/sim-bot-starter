@@ -15,7 +15,7 @@ The client is intentionally simple. It does:
   * Solo + tournament routing on a single method surface
 
 It does NOT do:
-  * Async (sync is enough for one bot per process — open an issue if you need async)
+  * Async (sync is enough for one bot per process - open an issue if you need async)
   * Caching (every call hits the network)
   * Background event loops (you call methods, you wait for the response)
 
@@ -213,7 +213,7 @@ class Client:
     def perception(self, *, tournament_id: str | None = None) -> PerceptionState:
         """Get the bot-optimized full game state. Subscription-only.
 
-        Recommended polling endpoint — one call returns round, player,
+        Recommended polling endpoint - one call returns round, player,
         investments (with affordability/multipliers), events, fork analysis,
         dark web powers/targets, staking info, and leaderboard.
 
@@ -262,11 +262,11 @@ class Client:
         )
 
     def paths(self, *, tournament_id: str | None = None) -> dict[str, Any]:
-        """Path system info — your selected path, bonuses, aggregated effects."""
+        """Path system info - your selected path, bonuses, aggregated effects."""
         return self._request("GET", _path_for("paths", tournament_id))  # type: ignore[no-any-return]
 
     def leaderboard(self, *, limit: int = 100, tournament_id: str | None = None) -> dict[str, Any]:
-        """Leaderboard — top N players ranked by net worth."""
+        """Leaderboard - top N players ranked by net worth."""
         return self._request(  # type: ignore[no-any-return]
             "GET",
             _path_for("leaderboard", tournament_id),
@@ -306,7 +306,7 @@ class Client:
         user_id: str | None = None,
         tournament_id: str | None = None,
     ) -> dict[str, Any]:
-        """Your sim profile — lifetime stats, top finishes, tickets.
+        """Your sim profile - lifetime stats, top finishes, tickets.
 
         Sim-only: tournament results come with `tournament_state(id)`.
 
@@ -325,6 +325,20 @@ class Client:
         """Your cards with sim boost effects (sim-only)."""
         _sim_only("cards", tournament_id)
         return self._request("GET", "/api/sim/cards")  # type: ignore[no-any-return]
+
+    def my_companion(self) -> dict[str, Any] | None:
+        """Your AI Companion, or None if you have none (sim-only).
+
+        The Companion is the in-game rule bot that acts every ~5 minutes on
+        the same cash as you. Its rules are readable with the same API key, so
+        a bot can run exactly the rules you set up in the browser; see
+        `examples/rules_agent.py`. Useful keys: `rules` (your current draft),
+        `locked` (the snapshot the Companion runs this round, or None),
+        `enabled`, `name`, `rarity`.
+        """
+        data = self._request("GET", "/api/sim/companions")
+        companion = data.get("myCompanion") if isinstance(data, dict) else None
+        return companion if isinstance(companion, dict) else None
 
     def autostake_status(self, *, tournament_id: str | None = None) -> dict[str, Any]:
         """Get current auto-stake status (sim-only).
@@ -809,7 +823,7 @@ class Client:
         ) as response:
             # Translate non-200 into the same exception types as regular calls
             if response.status_code != 200:
-                # Read the body for the error message — stream may not have JSON
+                # Read the body for the error message - stream may not have JSON
                 body_bytes = response.read()
                 try:
                     import json as _json

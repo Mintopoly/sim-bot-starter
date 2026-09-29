@@ -1,0 +1,20 @@
+[
+  {
+    "id": "rig",
+    "enabled": true,
+    "conditions": [],
+    "action": { "type": "BUY", "investmentId": 0, "buyMax": true, "untilCount": 50 }
+  },
+  {
+    "id": "open-node",
+    "enabled": true,
+    "conditions": [{ "field": "COUNT", "op": "GTE", "value": 50, "investmentId": 0 }],
+    "action": { "type": "UNLOCK", "investmentId": 1 }
+  },
+  {
+    "id": "node",
+    "enabled": true,
+    "conditions": [{ "field": "FORK", "op": "LTE", "value": 3 }],
+    "action": { "type": "BUY", "investmentId": 1, "quantity": 10 }
+  }
+]

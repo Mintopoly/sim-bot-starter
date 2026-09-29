@@ -511,7 +511,7 @@ def test_buy_keys_solo(client: Client, base_url: str) -> None:
 
 @respx.mock
 def test_buy_keys_tournament(client: Client, base_url: str) -> None:
-    """Bots can now buy keys in tournament rounds — required for dark-web
+    """Bots can now buy keys in tournament rounds - required for dark-web
     PvP gameplay (the trainer's HUMAN-only gate was lifted)."""
     route = respx.post(f"{base_url}/api/trainer/tournament/rnd_abc/buy-keys").mock(
         return_value=Response(200, json={"success": True, "keysAdded": 25})

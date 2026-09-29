@@ -60,6 +60,12 @@ class FakeSim:
     draft: list[str] = field(default_factory=list)
     contributed: float = 0.0
     purchases: int = 0
+    purchase_requests: int = 0
+    # Every action the server refused, e.g. "stake": a bot that acts on stale state shows
+    # up here even when it catches the error and carries on.
+    rejected: list[str] = field(default_factory=list)
+    # What GET /api/sim/companions returns as myCompanion (None = the player has none).
+    companion: dict[str, Any] | None = None
 
     # ─── game math ────────────────────────────────────────────────────────
 
@@ -90,11 +96,13 @@ class FakeSim:
     # ─── actions (shared by both surfaces) ────────────────────────────────
 
     def buy(self, inv_id: int, quantity: int) -> httpx.Response:
+        self.purchase_requests += 1
         if inv_id not in self.unlocked:
             return _bad("Investment is locked", "INVESTMENT_LOCKED")
         spec, have = INVESTMENTS[inv_id], self.owned.get(inv_id, 0)
         cost = sum(spec["price"] * spec["coef"] ** (have + k) for k in range(quantity))
         if cost > self.cash:
+            self.rejected.append("buy")
             return _bad("Not enough cash for this purchase", "INSUFFICIENT_CASH")
         self.cash -= cost
         self.owned[inv_id] = self.owned.get(inv_id, 0) + quantity
@@ -113,6 +121,7 @@ class FakeSim:
 
     def stake(self, amount: float) -> httpx.Response:
         if not amount > 0 or amount > self.cash:
+            self.rejected.append("stake")
             return _bad("Not enough cash to stake", "INSUFFICIENT_CASH")
         self.cash -= amount
         self.staked += amount
@@ -127,6 +136,7 @@ class FakeSim:
 
     def contribute(self, amount: float) -> httpx.Response:
         if not amount > 0 or amount > self.cash:
+            self.rejected.append("contribute")
             return _bad("Amount must be a positive finite number")
         self.cash -= amount
         self.contributed += amount
@@ -305,6 +315,8 @@ class FakeSim:
         router.post("/api/sim/autostake").mock(
             return_value=_bad("Auto-staking requires the Titanbot card"))
         router.post("/api/sim/dismiss").mock(return_value=_ok())
+        router.get("/api/sim/companions").mock(side_effect=lambda _: httpx.Response(
+            200, json={"items": [], "myCompanion": self.companion}))
         router.get("/api/sim/stream").mock(return_value=httpx.Response(
             200, content=sse, headers={"content-type": "text/event-stream"}))
 

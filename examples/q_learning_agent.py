@@ -1,4 +1,4 @@
-"""Tabular Q-learning agent — RL reference for the Sim bot starter kit.
+"""Tabular Q-learning agent - RL reference for the Sim bot starter kit.
 
 This is illustrative, not competitive. The Sim's true state is high-dimensional
 (continuous cash, investment counts, event mix, fork progress, lockout timers,
@@ -14,7 +14,7 @@ What it demonstrates:
   * Persistence: save the Q-table to disk so learning compounds across runs
 
 What it doesn't do:
-  * Function approximation (neural nets) — needed for a real-strategy bot
+  * Function approximation (neural nets) - needed for a real-strategy bot
   * Multi-agent modeling of opponent behavior
   * Long-horizon credit assignment
 
@@ -132,7 +132,7 @@ def bucket_state(state: PerceptionState) -> Bucket:
     progress = r.current_block / max(r.total_blocks, 1)
     progress_b = min(N_PROGRESS_BUCKETS - 1, int(progress * N_PROGRESS_BUCKETS))
 
-    # Event presence — coarse but sufficient for tabular
+    # Event presence - coarse but sufficient for tabular
     events_b = 1 if state.events_active else 0
 
     # Fork count buckets
@@ -185,7 +185,7 @@ def execute_action(client: Client, state: PerceptionState, action: int) -> str:
             return "can't stake"
         amount = state.player.cash * 0.5
         client.stake(amount=amount)
-        return f"staked ${amount:,.2f}"
+        return f"staked ${fmt_money(amount)}"
 
     if action == ACTION_UNSTAKE_HALF:
         if (
@@ -196,7 +196,7 @@ def execute_action(client: Client, state: PerceptionState, action: int) -> str:
             return "can't unstake"
         amount = state.player.staked_value * 0.5
         client.unstake(amount=amount)
-        return f"unstaked ${amount:,.2f}"
+        return f"unstaked ${fmt_money(amount)}"
 
     if action == ACTION_FORK:
         if state.fork is None or not state.fork.can_fork:
@@ -210,7 +210,7 @@ def execute_action(client: Client, state: PerceptionState, action: int) -> str:
         if amount > state.player.cash:
             return "can't contribute"
         client.contribute(amount=amount)
-        return f"contributed ${amount:.2f}"
+        return f"contributed ${fmt_money(amount)}"
 
     return f"unknown action {action}"
 
@@ -264,7 +264,7 @@ def save_qtable(q: np.ndarray, ticks: int) -> None:
 
 def run() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
-    log.info("Starting q_learning_agent. State space: %d states × %d actions",
+    log.info("Starting q_learning_agent. State space: %d states x %d actions",
              N_STATES, N_ACTIONS)
 
     q, ticks_done = load_qtable()
@@ -314,9 +314,9 @@ def run() -> None:
                 action_desc = execute_action(client, state, action)
 
                 log.info(
-                    "tick %d  cash=%s  rank=%d  fork=%d  bucket=%s  ε=%.2f  %s→%s  : %s",
+                    "tick %d  cash=%s  rank=%d  fork=%d  bucket=%s  eps=%.2f  %s->%s  : %s",
                     ticks_done,
-                    _short(state.player.cash),
+                    fmt_money(state.player.cash),
                     state.player.rank,
                     state.player.fork_number,
                     bucket,
@@ -356,11 +356,23 @@ def run() -> None:
             time.sleep(TICK_SECONDS)
 
 
-def _short(value: float) -> str:
-    for suffix, scale in (("Q", 1e15), ("T", 1e12), ("B", 1e9), ("M", 1e6), ("K", 1e3)):
-        if abs(value) >= scale:
-            return f"{value / scale:.2f}{suffix}"
-    return f"{value:.0f}"
+def fmt_money(v: float) -> str:
+    """Format money so both micro-balances (early round) and mega-balances
+    (late round) stay legible: 1.23K, 4.56M, 0.000137, 3.20e-07. Rounding to
+    whole units printed 'cash=$0' for a bot holding 0.0000031, which reads as
+    a broken bot."""
+    a = abs(v)
+    if a >= 1e9:
+        return f"{v / 1e9:.2f}B"
+    if a >= 1e6:
+        return f"{v / 1e6:.2f}M"
+    if a >= 1e3:
+        return f"{v / 1e3:.2f}K"
+    if a >= 1:
+        return f"{v:.2f}"
+    if a >= 1e-4:
+        return f"{v:.6f}"
+    return f"{v:.2e}"
 
 
 if __name__ == "__main__":

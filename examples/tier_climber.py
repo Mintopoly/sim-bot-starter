@@ -1,19 +1,19 @@
-"""Tier-climber agent — unlocks higher tiers and buys max affordable.
+"""Tier-climber agent - unlocks higher tiers and buys max affordable.
 
-Strategy (no forks — pure economic climb):
+Strategy (no forks - pure economic climb):
 
-  1. Defense first — buy IMMUNITY if blacked out and affordable.
+  1. Defense first - buy IMMUNITY if blacked out and affordable.
 
-  2. Unlock decision — for each locked investment we can afford to unlock,
+  2. Unlock decision - for each locked investment we can afford to unlock,
      compute its post-unlock buy ratio (earnings / cost). If it beats the
      best currently-unlocked buy ratio by `UNLOCK_THRESHOLD`, unlock it.
      Threshold > 1 prevents flapping back and forth between near-equal
      options.
 
-  3. Buy decision — find the unlocked investment with the best
-     earnings/cost ratio. Buy as many as we can afford while keeping
-     `CASH_BUFFER` liquid for opportunistic unlocks. Cap at `MAX_BUYS_PER_TICK`
-     so we don't burn the per-minute action rate limit on one ribbon.
+  3. Buy decision - find the unlocked investment with the best
+     earnings/cost ratio. Buy as many as fit into ONE purchase while
+     keeping the cash buffer liquid for opportunistic unlocks, capped at
+     `MAX_UNITS_PER_PURCHASE`.
 
   4. Stake spare cash above 2x buffer if staking lockout is clear.
 
@@ -50,7 +50,7 @@ TICK_SECONDS = 15
 # strangle one regime to protect the other.
 CASH_BUFFER_FRACTION = 0.10
 UNLOCK_THRESHOLD = 1.5  # only unlock if its buy ratio is >=1.5x the current best
-MAX_BUYS_PER_TICK = 8  # cap per-tick HTTP calls (action rate limit is 60/min)
+MAX_UNITS_PER_PURCHASE = 100  # the manual buy cap; one request per tick either way
 CONTRIB_INTERVAL_SECONDS = 60.0
 CONTRIB_FRACTION = 0.01
 IMMUNITY_RESERVE_FRACTION = 0.30
@@ -97,7 +97,7 @@ def best_unlock_candidate(
 def best_unlock_target(
     state: PerceptionState, current_best_ratio: float
 ) -> Investment | None:
-    """Locked investment worth saving toward — ratio beats threshold regardless
+    """Locked investment worth saving toward - ratio beats threshold regardless
     of whether we can afford it yet. Used to set a cash-preservation floor.
     """
     candidates = [
@@ -146,35 +146,31 @@ def buy_max_affordable(
     state: PerceptionState,
     save_target: Investment | None = None,
 ) -> tuple[int, str | None]:
-    """Buy as many of the best unlocked investment as we can, up to a cap.
-    Refreshes state between buys because cost compounds. Returns (count, last_name).
+    """Buy as many units of the best unlocked investment as fit into ONE
+    purchase. Returns (units, name).
 
-    If save_target is set, the cash floor is raised to that investment's unlock_cost
-    so we accumulate rather than spend every tick toward the higher-value tier.
+    units_affordable walks the price curve the way the server charges a
+    multi-unit purchase, so one request replaces a buy-and-refresh loop.
+    If save_target is set, the cash floor is raised to that investment's
+    unlock_cost so we accumulate toward the higher-value tier instead.
     """
-    bought = 0
-    last_name: str | None = None
-    while bought < MAX_BUYS_PER_TICK:
-        if state.player is None:
-            break
-        target = best_buy(state)
-        if target is None:
-            break
-        buffer = state.player.cash * CASH_BUFFER_FRACTION
-        # Raise the floor to the save target's unlock cost so we don't spend
-        # down to zero when a better tier is within reach.
-        if save_target is not None and save_target.unlock_cost is not None:
-            buffer = max(buffer, save_target.unlock_cost)
-        if target.next_cost > (state.player.cash - buffer):
-            break
-        client.purchase(investment_id=target.id, quantity=1)
-        bought += 1
-        last_name = target.name
-        # Refresh — cost compounds and another investment might now beat this one
-        state = client.perception()
-        if not state.active or state.player is None:
-            break
-    return bought, last_name
+    if state.player is None:
+        return 0, None
+    target = best_buy(state)
+    if target is None:
+        return 0, None
+    buffer = state.player.cash * CASH_BUFFER_FRACTION
+    # Raise the floor to the save target's unlock cost so we don't spend
+    # down to zero when a better tier is within reach.
+    if save_target is not None and save_target.unlock_cost is not None:
+        buffer = max(buffer, save_target.unlock_cost)
+    units = target.units_affordable(
+        state.player.cash - buffer, limit=MAX_UNITS_PER_PURCHASE
+    )
+    if units == 0:
+        return 0, None
+    client.purchase(investment_id=target.id, quantity=units)
+    return units, target.name
 
 
 def maybe_stake(client: Client, state: PerceptionState) -> str | None:
@@ -248,7 +244,7 @@ def tick(client: Client, mem: State) -> None:
         if not state.active or state.player is None:
             return
 
-    # 3. Buy max affordable of the best unlocked — but save toward a better tier
+    # 3. Buy max affordable of the best unlocked - but save toward a better tier
     current_best = best_buy(state)
     current_ratio = buy_ratio(current_best) if current_best else 0.0
     save_target = best_unlock_target(state, current_ratio)
@@ -277,7 +273,7 @@ def tick(client: Client, mem: State) -> None:
         actions.append(a)
 
     log.info(
-        "block %d/%d  cash=$%s  nw=$%s  rank=%d/%d  fork#%d  → %s",
+        "block %d/%d  cash=$%s  nw=$%s  rank=%d/%d  fork#%d  -> %s",
         state.round.current_block,
         state.round.total_blocks,
         fmt_money(state.player.cash),
