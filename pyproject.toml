@@ -41,8 +41,8 @@ dev = [
 [project.urls]
 Homepage = "https://www.childrenoftitan.com"
 Documentation = "https://www.childrenoftitan.com/sim/docs"
-Repository = "https://github.com/children-of-titan/sim-bot-starter"
-Issues = "https://github.com/children-of-titan/sim-bot-starter/issues"
+Repository = "https://github.com/Mintopoly/sim-bot-starter"
+Issues = "https://github.com/Mintopoly/sim-bot-starter/issues"
 
 [tool.setuptools]
 packages = ["simbot"]
