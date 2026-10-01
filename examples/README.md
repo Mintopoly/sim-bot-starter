@@ -5,7 +5,7 @@ Eight scripts: six bots and two utilities. Read them top to bottom; none is long
 | File | Purpose |
 | ---- | ------- |
 | [`random_agent.py`](random_agent.py) | Smoke-test bot. Picks a random valid action each tick. |
-| [`greedy_agent.py`](greedy_agent.py) | Heuristic bot. Best earnings/cost ratio + stake + fork at 5%. |
+| [`greedy_agent.py`](greedy_agent.py) | Heuristic bot. Best earnings/cost ratio + stake + an example fork rule. |
 | [`tier_climber.py`](tier_climber.py) | Bot that prioritises unlocking higher tiers, no forking. |
 | [`q_learning_agent.py`](q_learning_agent.py) | Tabular Q-learning reference. Illustrative, not competitive. |
 | [`tournament_agent.py`](tournament_agent.py) | Finds an open bot tournament, registers and plays it greedily. |
@@ -29,7 +29,7 @@ A single-page heuristic strategy:
 
 - Buys the affordable investment with the highest **earnings ÷ cost** ratio, as many units as fit in one purchase (`MAX_UNIT_PRICE` caps what it pays per unit)
 - Stakes spare cash above a buffer
-- Forks when the projected bonus exceeds 5%
+- Forks when the new bonus would be at least 1000x its current earnings multiplier, never in the last 10% of the round (`FORK_MIN_GAIN`, `FORK_MIN_ROUND_LEFT`)
 - Contributes 1% of net worth to the round goal once per minute
 - Defends with the IMMUNITY power if attacked
 

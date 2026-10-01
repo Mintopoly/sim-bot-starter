@@ -9,6 +9,7 @@ from simbot.types import (
     PerceptionState,
     Player,
     Round,
+    StakingInfo,
 )
 
 
@@ -415,3 +416,67 @@ def test_units_affordable_respects_the_limit_and_locked_lines() -> None:
 def test_cost_of_sums_the_curve() -> None:
     assert _inv().cost_of(3) == 7.0
     assert _inv().cost_of(0) == 0.0
+
+
+# --- effective figures (server sends what the tally pays) -------------------
+
+
+def test_payout_per_unit_prefers_the_servers_effective_figure() -> None:
+    """Perception sends effectiveEarningsPerUnit with fork bonus, card boosts and
+    path multiplier applied; earningsPerUnit is only preset x event. Payback maths
+    must use the effective one, or a bot after its first fork underrates every line
+    by the whole fork multiplier."""
+    i = Investment._from_json(
+        {"id": 0, "earningsPerUnit": 1e-7, "effectiveEarningsPerUnit": 3.5e-7,
+         "baseCost": 5e-8, "baseEarnings": 1e-7}
+    )
+    assert i.payout_per_unit == 3.5e-7
+    assert (i.base_cost, i.base_earnings) == (5e-8, 1e-7)
+
+
+def test_payout_per_unit_falls_back_where_the_server_sends_no_effective_figure() -> None:
+    """The tournament surface sends no effective figure; fall back, never 0."""
+    i = Investment._from_json({"id": 0, "earningsPerUnit": 1e-7})
+    assert i.effective_earnings_per_unit is None
+    assert i.payout_per_unit == 1e-7
+
+
+def test_staking_reports_the_full_lockout_when_sent() -> None:
+    assert StakingInfo._from_json({"stakingLockoutBlocks": 400}).lockout_blocks == 400
+    assert StakingInfo._from_json({}).lockout_blocks is None
+
+
+def test_tournament_staking_uses_the_trainers_effective_rate() -> None:
+    """The bare round rate leaves out the card staking boost and the path
+    multiplier, the very number a bot's buy-versus-stake decision rests on."""
+    payload = {
+        "success": True, "active": True,
+        "round": {"id": "t1", "currentBlock": 1, "totalBlocks": 100, "stakingRate": 0.0002,
+                  "entryCount": 3},
+        "state": {"cash": 1.0, "stakedValue": 0.0, "investmentValue": 0.0,
+                  "netWorth": 1.0, "earningsPerBlock": 0.0,
+                  "stakingLockoutRemaining": 0, "stakingLockoutBlocks": 400,
+                  "effectiveStakingRate": 0.000297},
+        "forkConfig": {"currentBonusPercent": 0.0}, "userRank": 1,
+        "investments": [{"id": 0, "count": 1, "isUnlocked": True, "baseEarnings": 1e-7,
+                         "effectiveEarningsPerUnit": 4e-7, "nextCost": 5e-8}],
+    }
+    st = PerceptionState._from_json(payload)
+    assert st.staking is not None
+    assert st.staking.effective_rate == 0.000297
+    assert st.staking.lockout_blocks == 400
+    assert st.investments[0].payout_per_unit == 4e-7
+
+
+def test_tournament_staking_falls_back_to_the_round_rate_on_older_trainers() -> None:
+    payload = {
+        "success": True, "active": True,
+        "round": {"id": "t1", "currentBlock": 1, "totalBlocks": 100, "stakingRate": 0.0002,
+                  "entryCount": 3},
+        "state": {"cash": 1.0, "stakedValue": 0.0, "investmentValue": 0.0,
+                  "netWorth": 1.0, "earningsPerBlock": 0.0, "stakingLockoutRemaining": 0},
+        "forkConfig": {"currentBonusPercent": 0.0}, "userRank": 1,
+        "investments": [],
+    }
+    st = PerceptionState._from_json(payload)
+    assert st.staking is not None and st.staking.effective_rate == 0.0002

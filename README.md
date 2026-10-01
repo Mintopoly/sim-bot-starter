@@ -76,13 +76,15 @@ Full API docs: [childrenoftitan.com/sim/docs](https://www.childrenoftitan.com/si
 | File | What it does |
 | ---- | ------------ |
 | [`examples/random_agent.py`](examples/random_agent.py) | Random valid action each tick - sanity check, not competitive. |
-| [`examples/greedy_agent.py`](examples/greedy_agent.py) | Best earnings/cost ratio + stake + fork at 5%. Never unlocks a new tier; a simple starting point. |
+| [`examples/greedy_agent.py`](examples/greedy_agent.py) | Best earnings/cost ratio + stake + an example fork rule. Never unlocks a new tier; a simple starting point. |
 | [`examples/tier_climber.py`](examples/tier_climber.py) | Saves toward higher-tier unlocks, no forking. Demonstrates the unlock→buy→stake loop in isolation. |
 | [`examples/q_learning_agent.py`](examples/q_learning_agent.py) | Tabular Q-learning reference. Illustrative, not competitive. |
 | [`examples/tournament_agent.py`](examples/tournament_agent.py) | Finds an open bot tournament, registers and plays it with the greedy strategy. |
 | [`examples/rules_agent.py`](examples/rules_agent.py) | Runs your AI Companion's rules (or a JSON file of them) every block instead of every five minutes. |
 | [`examples/verify_endpoints.py`](examples/verify_endpoints.py) | End-to-end smoke test - exercises every endpoint and prints a pass/skip/fail matrix. |
 | [`examples/stream_smoke.py`](examples/stream_smoke.py) | Connects to the SSE stream, prints events for ~70 s, exits. |
+
+**These are templates, not winning strategies.** Every threshold in them (cash buffer, fork rule, contribution share) is a reasonable starting point picked to show how the API works, not a tuned setting. Building a bot that climbs the leaderboard is your part: measure, change the rules, measure again.
 
 Read each example top-to-bottom before modifying; none is longer than about 380 lines. `tests/test_examples.py` runs every one of them against an offline copy of the game, so a change that stops a bot from trading fails the test suite. See [`examples/README.md`](examples/README.md) for the longer walk-through.
 
@@ -113,6 +115,7 @@ keys = client.buy_keys_info()         # Key purchase options + current key/gem b
 client.purchase(investment_id=0, quantity=5)              # Buy 5 of investment 0
 now = client.perception()                                 # Fresh state before you spend
 me, rig = now.player, now.investments[0]                  # Your cash and stake, investment 0
+payback = rig.next_cost / rig.payout_per_unit             # Blocks one unit takes to pay for itself
 n = rig.units_affordable(me.cash * 0.9)                   # How many fit into ONE purchase (0 = none)
 if n:
     cost = rig.cost_of(n)                                 # What that purchase will cost

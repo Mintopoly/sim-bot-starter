@@ -8,7 +8,8 @@ Strategy (intentionally simple - like greedy_agent.py but tournament-scoped):
   * On startup: list active tournaments, pick the first BOT_ONLY tournament
     we're eligible for, register, then enter the tick loop.
   * Each tick: best earnings/cost ratio investment, stake spare cash,
-    fork at 5% projected bonus, contribute 1% of cash per minute.
+    fork when it multiplies earnings enough (see greedy_agent.py), contribute
+    1% of cash per minute.
   * Honors the round's feature flags - if disableFork is set, skip forking;
     if disableDarkWeb is set, skip immunity.
 
@@ -43,7 +44,11 @@ TICK_SECONDS = 15
 # Share of cash kept liquid. A fraction, not an amount: a round starts with
 # 0.000001 cash, so a fixed 1,000 meant the agent never bought anything.
 CASH_BUFFER_FRACTION = 0.10
-FORK_THRESHOLD_PERCENT = 5.0
+# Same example fork rule as greedy_agent.py (read the comment there). A
+# starting point to tune, not a winning setting. The end guard is a share of
+# the round because tournaments can be far shorter than the open round.
+FORK_MIN_GAIN = 1000.0
+FORK_MIN_ROUND_LEFT = 0.10
 CONTRIB_INTERVAL_SECONDS = 60.0
 CONTRIB_FRACTION = 0.01
 IMMUNITY_RESERVE_FRACTION = 0.30
@@ -111,7 +116,7 @@ def best_investment(state: PerceptionState, max_spend: float) -> Investment | No
     ]
     if not candidates:
         return None
-    return max(candidates, key=lambda i: (i.earnings_per_unit or 0) / i.next_cost)
+    return max(candidates, key=lambda i: i.payout_per_unit / i.next_cost)
 
 
 def maybe_buy(client: Client, state: PerceptionState, tournament_id: str) -> bool:
@@ -157,7 +162,12 @@ def maybe_fork(
         return False
     if not state.fork or not state.fork.can_fork:
         return False
-    if state.fork.projected_bonus_percent < FORK_THRESHOLD_PERCENT:
+    if state.player is None or state.round is None:
+        return False
+    left = state.round.blocks_remaining / max(state.round.total_blocks, 1)
+    if left < FORK_MIN_ROUND_LEFT:
+        return False
+    if state.fork.projected_bonus / (1 + state.player.fork_bonus) < FORK_MIN_GAIN:
         return False
     try:
         # One call does the whole fork: it fetches the draft, takes the first

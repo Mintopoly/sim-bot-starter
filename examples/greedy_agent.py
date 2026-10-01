@@ -6,8 +6,9 @@ Strategy:
     It never unlocks a new tier, so it stays on the investments it starts
     with; tier_climber.py shows how to unlock.
   * Stake any cash above the cash buffer once the staking lockout clears.
-  * Fork when projected bonus exceeds 5% (or 2% past block ~80% - last-stretch
-    forks compound less, so we relax the threshold).
+  * Fork when the new bonus would be at least 1000x the current earnings
+    multiplier, and never in the last 10% of the round. An example rule to
+    tune, not a winning setting (see FORK_MIN_GAIN).
   * Contribute 1% of net worth to the round goal once a minute (cheap goodwill,
     plus the ticket reward for finishing rounds is meaningful long-term).
   * Defend with IMMUNITY when affordable to mitigate blackout attacks.
@@ -49,9 +50,19 @@ CASH_BUFFER_FRACTION = 0.10
 # cost curve is geometric, so without one a big budget keeps buying ever
 # pricier units. It is an absolute amount, so set it for the round you play.
 MAX_UNIT_PRICE: float | None = None
-FORK_THRESHOLD_PERCENT = 5.0  # default fork trigger
-FORK_LATE_THRESHOLD_PERCENT = 2.0  # relaxed in late round
-LATE_ROUND_PROGRESS = 0.80  # ≥80% block progress is "late"
+# Fork rule. A STARTING POINT, not a winning setting: tune it for your own bot.
+# A fork adds netWorth / 5^forks to your bonus and earnings run at (1 + bonus),
+# but it also resets the whole run. So the question is how much it multiplies
+# what you earn now: fork when the new bonus is at least FORK_MIN_GAIN times
+# your current multiplier, and only while enough of the round is left to
+# rebuild. Do NOT compare `projected_bonus_percent` to a fixed percentage: it
+# is the absolute bonus x 100, so "5%" means net worth 0.05 on the first fork,
+# minutes into a round, and burns all seven forks almost at once. In a
+# simplified full-round model (preset 0, no events or cards) that rule ended
+# the round ~10^7 times below never forking at all, while gains of 300x to
+# 10,000x all came out far ahead of never forking. Measure your own.
+FORK_MIN_GAIN = 1000.0
+FORK_MIN_ROUND_LEFT = 0.10  # never fork in the last 10% of the round
 CONTRIB_INTERVAL_SECONDS = 60.0
 CONTRIB_FRACTION = 0.01  # 1% of net worth per minute - cheap goodwill
 IMMUNITY_RESERVE_FRACTION = 0.30  # don't blow >30% of keys on defense
@@ -77,10 +88,11 @@ def best_affordable(state: PerceptionState) -> Investment | None:
     candidates = [i for i in state.investments if i.unlocked and i.can_afford]
     if not candidates:
         return None
-    # `earnings_per_unit` already bakes in current event multipliers; same for
-    # `next_cost`. We rank by post-event ratio to chase the optimal short-term
-    # buy under whatever event is live.
-    return max(candidates, key=lambda i: i.earnings_per_unit / max(i.next_cost, 1.0))
+    # `payout_per_unit` and `next_cost` both include live events and your card,
+    # fork and path boosts, so this is the real payback ratio right now. The
+    # floor only guards a zero price: prices start around 0.00000005, so a
+    # floor of 1.0 would ignore price entirely and just pick the top earner.
+    return max(candidates, key=lambda i: i.payout_per_unit / max(i.next_cost, 1e-12))
 
 
 def should_fork(state: PerceptionState) -> bool:
@@ -89,13 +101,18 @@ def should_fork(state: PerceptionState) -> bool:
     if not state.fork.can_fork:
         return False
 
-    progress = state.round.current_block / max(state.round.total_blocks, 1)
-    threshold = (
-        FORK_LATE_THRESHOLD_PERCENT
-        if progress >= LATE_ROUND_PROGRESS
-        else FORK_THRESHOLD_PERCENT
-    )
-    return state.fork.projected_bonus_percent >= threshold
+    return fork_is_worth_it(state)
+
+
+def fork_is_worth_it(state: PerceptionState) -> bool:
+    """The example fork rule: see FORK_MIN_GAIN above."""
+    if state.fork is None or state.round is None or state.player is None:
+        return False
+    left = state.round.blocks_remaining / max(state.round.total_blocks, 1)
+    if left < FORK_MIN_ROUND_LEFT:
+        return False
+    gain = state.fork.projected_bonus / (1 + state.player.fork_bonus)
+    return gain >= FORK_MIN_GAIN
 
 
 def maybe_buy_immunity(client: Client, state: PerceptionState) -> str | None:

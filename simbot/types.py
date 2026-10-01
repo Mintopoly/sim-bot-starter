@@ -165,6 +165,16 @@ class Player:
         )
 
 
+def _opt_float(v: Any) -> float | None:
+    """A float, or None when the server did not send the field."""
+    return float(v) if v is not None else None
+
+
+def _opt_int(v: Any) -> int | None:
+    """An int, or None when the server did not send the field."""
+    return int(v) if v is not None else None
+
+
 @dataclass(frozen=True)
 class Investment:
     id: int
@@ -181,6 +191,20 @@ class Investment:
     cost_multiplier: float
     earnings_multiplier: float
     coefficient: float
+    # What the tally pays per unit, with fork bonus, card boosts and path
+    # multiplier applied. None where the server does not send it (tournaments).
+    effective_earnings_per_unit: float | None = None
+    base_cost: float | None = None  # price of the very first unit, before any modifier
+    base_earnings: float | None = None  # preset earnings per unit, before any modifier
+
+    @property
+    def payout_per_unit(self) -> float:
+        """Best known earnings per unit per block: the server's effective
+        figure when it sends one, else `earnings_per_unit` (preset x event).
+        Use this for payback maths: `next_cost / payout_per_unit` blocks."""
+        if self.effective_earnings_per_unit is not None:
+            return self.effective_earnings_per_unit
+        return self.earnings_per_unit
 
     @classmethod
     def _from_json(cls, d: dict[str, Any]) -> Investment:
@@ -200,6 +224,9 @@ class Investment:
             cost_multiplier=float(d.get("costMultiplier", 1.0)),
             earnings_multiplier=float(d.get("earningsMultiplier", 1.0)),
             coefficient=float(d.get("coefficient", 1.0)),
+            effective_earnings_per_unit=_opt_float(d.get("effectiveEarningsPerUnit")),
+            base_cost=_opt_float(d.get("baseCost")),
+            base_earnings=_opt_float(d.get("baseEarnings")),
         )
 
     def units_affordable(
@@ -350,6 +377,7 @@ class StakingInfo:
     can_unstake: bool
     has_unlimited_staking: bool
     unlimited_staking_ends_in: int
+    lockout_blocks: int | None = None  # full lockout after a stake, path reduction applied
 
     @classmethod
     def _from_json(cls, d: dict[str, Any]) -> StakingInfo:
@@ -361,6 +389,7 @@ class StakingInfo:
             can_unstake=bool(d.get("canUnstake", False)),
             has_unlimited_staking=bool(d.get("hasUnlimitedStaking", False)),
             unlimited_staking_ends_in=int(d.get("unlimitedStakingEndsIn", 0)),
+            lockout_blocks=_opt_int(d.get("stakingLockoutBlocks")),
         )
 
 
@@ -575,11 +604,12 @@ def _normalize_tournament_perception(d: dict[str, Any]) -> dict[str, Any]:
 
     staking = {
         "baseRate": round_meta.get("stakingRate", 0.0),
-        # No "effective rate" in the tournament full state, so fall back to the
-        # base rate so bots see a non-zero number. Path/event multipliers
-        # are not surfaced in this DTO; read `playerEffects` for them.
-        "effectiveRate": round_meta.get("stakingRate", 0.0),
+        # The trainer sends the rate the tally compounds with (card staking
+        # boost and path multiplier applied) as state.effectiveStakingRate.
+        # Older trainers did not; fall back to the bare round rate there.
+        "effectiveRate": state.get("effectiveStakingRate", round_meta.get("stakingRate", 0.0)),
         "lockoutBlocksRemaining": state.get("stakingLockoutRemaining", 0),
+        "stakingLockoutBlocks": state.get("stakingLockoutBlocks"),
         "canStake": state.get("stakingLockoutRemaining", 0) == 0
         and (state.get("cash") or 0) > 0,
         "canUnstake": state.get("stakingLockoutRemaining", 0) == 0

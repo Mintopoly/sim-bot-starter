@@ -69,7 +69,7 @@ class State:
 
 def buy_ratio(inv: Investment) -> float:
     """Earnings per block per cost unit. Higher is better."""
-    return inv.earnings_per_unit / max(inv.next_cost, 1e-12)
+    return inv.payout_per_unit / max(inv.next_cost, 1e-12)
 
 
 def best_buy(state: PerceptionState) -> Investment | None:
